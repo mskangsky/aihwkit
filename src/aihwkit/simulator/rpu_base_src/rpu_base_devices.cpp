@@ -9,6 +9,7 @@
 #include "rpu_buffered_transfer_device.h"
 #include "rpu_chopped_transfer_device.h"
 #include "rpu_constantstep_device.h"
+#include "rpu_custom_device.h"
 #include "rpu_dynamic_transfer_device.h"
 #include "rpu_expstep_device.h"
 #include "rpu_linearstep_device.h"
@@ -33,6 +34,7 @@ template <typename T> void declare_rpu_devices(py::module &m, std::string type_n
   using PulsedBaseParam = RPU::PulsedRPUDeviceMetaParameterBase<T>;
   using PulsedParam = RPU::PulsedRPUDeviceMetaParameter<T>;
   using ConstantStepParam = RPU::ConstantStepRPUDeviceMetaParameter<T>;
+  using CustomParam = RPU::CustomRPUDeviceMetaParameter<T>;
   using LinearStepParam = RPU::LinearStepRPUDeviceMetaParameter<T>;
   using SoftBoundsParam = RPU::SoftBoundsRPUDeviceMetaParameter<T>;
   using ExpStepParam = RPU::ExpStepRPUDeviceMetaParameter<T>;
@@ -144,6 +146,27 @@ template <typename T> void declare_rpu_devices(py::module &m, std::string type_n
     }
     T calcWeightGranularity() const override {
       PYBIND11_OVERLOAD(T, ConstantStepParam, calcWeightGranularity, );
+    }
+  };
+
+  class PyCustomParam : public CustomParam {
+  public:
+    std::string getName() const override {
+      PYBIND11_OVERLOAD(std::string, CustomParam, getName, );
+    }
+    CustomParam *clone() const override {
+      PYBIND11_OVERLOAD(CustomParam *, CustomParam, clone, );
+    }
+    RPU::DeviceUpdateType implements() const override {
+      PYBIND11_OVERLOAD(RPU::DeviceUpdateType, CustomParam, implements, );
+    }
+    RPU::CustomRPUDevice<T> *
+    createDevice(int x_size, int d_size, RPU::RealWorldRNG<T> *rng) override {
+      PYBIND11_OVERLOAD(
+          RPU::CustomRPUDevice<T> *, CustomParam, createDevice, x_size, d_size, rng);
+    }
+    T calcWeightGranularity() const override {
+      PYBIND11_OVERLOAD(T, CustomParam, calcWeightGranularity, );
     }
   };
 
@@ -595,6 +618,24 @@ template <typename T> void declare_rpu_devices(py::module &m, std::string type_n
           R"pbdoc(
         Calculates the granularity of the weights (typically ``dw_min``)
 
+        Returns:
+           float: weight granularity
+        )pbdoc");
+
+  py::class_<CustomParam, PyCustomParam, PulsedParam>(
+      m, NAME("CustomResistiveDeviceParameter"))
+      .def(py::init<>())
+      .def(
+          "__str__",
+          [](CustomParam &self) {
+            std::stringstream ss;
+            self.printToStream(ss);
+            return ss.str();
+          })
+      .def(
+          "calc_weight_granularity", &CustomParam::calcWeightGranularity,
+          R"pbdoc(
+        Calculates the granularity of the weights (typically ``dw_min``)
         Returns:
            float: weight granularity
         )pbdoc");
