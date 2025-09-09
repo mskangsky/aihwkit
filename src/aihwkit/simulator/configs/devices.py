@@ -370,6 +370,14 @@ class ConstantStepDevice(PulsedDevice):
 
 
 @dataclass
+class CustomDevice(PulsedDevice):
+    r"""Pulsed update behavioral model: custom step.
+    """
+
+    bindings_class: ClassVar[Optional[Union[Type, str]]] = "CustomResistiveDeviceParameter"
+
+
+@dataclass
 class LinearStepDevice(PulsedDevice):
     r"""Pulsed update behavioral model: linear step.
 
