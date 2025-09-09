@@ -372,6 +372,15 @@ class ConstantStepDevice(PulsedDevice):
 @dataclass
 class CustomDevice(PulsedDevice):
     r"""Pulsed update behavioral model: custom step.
+
+    This device can be used as a template for creating new devices with custom behavior.
+    The C++ and CUDA implementation of this device can be found in the files:
+    - ``src/rpucuda/rpu_custom_device.h``
+    - ``src/rpucuda/rpu_custom_device.cpp``
+    - ``src/rpucuda/cuda/rpucuda_custom_device.h``
+    - ``src/rpucuda/cuda/rpucuda_custom_device.cu``
+
+    To create a new device, copy these files and modify them to implement the desired behavior.
     """
 
     bindings_class: ClassVar[Optional[Union[Type, str]]] = "CustomResistiveDeviceParameter"

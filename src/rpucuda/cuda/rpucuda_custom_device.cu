@@ -10,8 +10,30 @@
 
 namespace RPU {
 
+/**
+ * @brief Functor for the custom update rule.
+ *
+ * This functor implements the custom update rule for the device. It is called by the update kernels
+ * to update the weights of the device.
+ *
+ * @tparam T The data type of the weights.
+ */
 template <typename T> struct UpdateFunctorCustom {
 
+  /**
+   * @brief The operator() of the functor.
+   *
+   * @param w The weight to update.
+   * @param n The number of pulses.
+   * @param negative Whether the update is negative.
+   * @param par_4 A struct with 4 parameters.
+   * @param par_2 A struct with 2 parameters.
+   * @param par_1 A single parameter.
+   * @param global_par A pointer to the global parameters.
+   * @param global_params_count The number of global parameters.
+   * @param noise_std_dw The standard deviation of the weight change.
+   * @param local_state The local state of the random number generator.
+   */
   __device__ __forceinline__ void operator()(
       T &w,
       uint32_t n,
@@ -24,46 +46,73 @@ template <typename T> struct UpdateFunctorCustom {
       T noise_std_dw,
       curandState &local_state) {
 
-    // note that only w and par_1 will be written back when used. Thus it can be a "hidden_weights"
-    // type note that we here assume that stoch_value is < 1, or if larger, then it did not hit the
-    // bound.
+    // Unused parameters.
     UNUSED(global_params_count);
     UNUSED(global_par);
     UNUSED(par_1);
     UNUSED(par_2);
 
+    // Get the device parameters.
     T dw = (negative > 0) ? ((T)par_4.w) : (-(T)par_4.y);
     T wmax = (T)par_4.z;
     T wmin = (T)par_4.x;
     T sigma = noise_std_dw;
-    // n is larger 0 in any case
+    // n is larger 0 in any case.
     if (n == 1) {
+      // If there is only one pulse, update the weight.
       if (sigma > (T)0.0) {
+        // If there is noise, add it to the weight change.
         T stoch_value = (T)curand_normal(&local_state);
         stoch_value *= sigma;
         w += dw * ((T)1.0 + stoch_value);
       } else {
+        // If there is no noise, just update the weight.
         w += dw;
       }
     } else {
+      // If there are multiple pulses, update the weight.
       if (sigma > (T)0.0) {
+        // If there is noise, add it to the weight change.
         T stoch_value = (T)curand_normal(&local_state);
         stoch_value *= sigma;
         w += dw * (T)n * ((T)1.0 + rsqrt((T)n) * stoch_value); // rsqrt(x) = 1/sqrt(x) is faster
       } else {
+        // If there is no noise, just update the weight.
         w += dw * (T)n;
       }
     }
 
-    // better always check both bounds
+    // Clip the weight to the bounds.
     w = (w > wmax) ? wmax : w;
     w = (w < wmin) ? wmin : w;
   }
 };
 
 
+/**
+ * @brief Functor for the custom update rule with large noise.
+ *
+ * This functor implements the custom update rule for the device with large noise. It is called by the
+ * update kernels to update the weights of the device.
+ *
+ * @tparam T The data type of the weights.
+ */
 template <typename T> struct UpdateFunctorCustomLargeNoise {
 
+  /**
+   * @brief The operator() of the functor.
+   *
+   * @param w The weight to update.
+   * @param n The number of pulses.
+   * @param negative Whether the update is negative.
+   * @param par_4 A struct with 4 parameters.
+   * @param par_2 A struct with 2 parameters.
+   * @param par_1 A single parameter.
+   * @param global_par A pointer to the global parameters.
+   * @param global_params_count The number of global parameters.
+   * @param noise_std_dw The standard deviation of the weight change.
+   * @param local_state The local state of the random number generator.
+   */
   __device__ __forceinline__ void operator()(
       T &w,
       uint32_t n,
@@ -76,6 +125,7 @@ template <typename T> struct UpdateFunctorCustomLargeNoise {
       T noise_std_dw,
       curandState &local_state) {
 
+    // Unused parameters.
     UNUSED(global_params_count);
     UNUSED(global_par);
     UNUSED(par_1);
@@ -89,20 +139,24 @@ template <typename T> struct UpdateFunctorCustomLargeNoise {
 
     // n is larger 0 in any case
     if (n == 1) { // short-cut without loop
+      // If there is only one pulse, update the weight.
       float stoch_value = curand_normal(&local_state);
       stoch_value *= sigma;
       w += dw * ((float)1.0 + stoch_value);
 
+      // Clip the weight to the bounds.
       w = (w > wmax) ? wmax : w;
       w = (w < wmin) ? wmin : w;
 
     } else {
+      // If there are multiple pulses, update the weight.
       for (int i = 0; i < n; i++) { // need to loop here because noise can be large and hit the
                                     // boundary and retract again because of sign reverse
         float stoch_value = curand_normal(&local_state);
         stoch_value *= sigma;
         w += dw * ((float)1.0 + stoch_value);
 
+        // Clip the weight to the bounds.
         w = (w > wmax) ? wmax : w;
         w = (w < wmin) ? wmin : w;
       }
@@ -110,17 +164,34 @@ template <typename T> struct UpdateFunctorCustomLargeNoise {
   }
 };
 
+// This macro defines the arguments for the update kernels.
 #define ARGS(NAME)                                                                                 \
   (this->context_, this->x_size_, this->d_size_, m_batch, nK32, use_bo64, out_trans, up,           \
    getPar().getName() + #NAME)
 
+/**
+ * @brief Gets the update kernels for the device.
+ *
+ * This method returns a vector of update kernels that are used to update the weights of the device.
+ *
+ * @tparam T The data type of the weights.
+ * @param m_batch The size of the mini-batch.
+ * @param nK32 The number of K32 blocks.
+ * @param use_bo64 Whether to use 64-bit operations.
+ * @param out_trans Whether to transpose the output.
+ * @param up The pulsed update meta-parameter.
+ * @return A vector of update kernels.
+ */
 template <typename T>
 pwukpvec_t<T> CustomRPUDeviceCuda<T>::getUpdateKernels(
     int m_batch, int nK32, int use_bo64, bool out_trans, const PulsedUpdateMetaParameter<T> &up) {
 
+  // Create a vector of update kernels.
   pwukpvec_t<T> v;
 
+  // Check if the noise is large.
   if (getPar().dw_min_std > (T)0.33) { // 3 sigma
+    // If the noise is large, use the large noise functor.
     v.push_back(
         RPU::make_unique<
             PWUKernelParameterSingleFunctor<T, UpdateFunctorCustomLargeNoise<T>, 1>>
@@ -138,6 +209,7 @@ pwukpvec_t<T> CustomRPUDeviceCuda<T>::getUpdateKernels(
             T, UpdateFunctorCustomLargeNoise<T>, 1>> ARGS(FunctorLargeNoise));
 
   } else {
+    // If the noise is small, use the normal functor.
     // use summing approximation is save in this case
     // Update functor and kernels are in pwu_kernels.h
     v.push_back(
@@ -161,11 +233,13 @@ pwukpvec_t<T> CustomRPUDeviceCuda<T>::getUpdateKernels(
     v.push_back(RPU::make_unique<PWUKernelParameterBatchSumBoundCheck<T>> ARGS(SumBC));
   }
 
+  // Return the vector of update kernels.
   return v;
 }
 
 #undef ARGS
 
+// Instantiate the class for the different data types.
 template class CustomRPUDeviceCuda<float>;
 #ifdef RPU_USE_DOUBLE
 template class CustomRPUDeviceCuda<double>;
